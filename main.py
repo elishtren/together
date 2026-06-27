@@ -1,17 +1,17 @@
 import os
 import pickle
-from datetime import datetime, timedelta
+import json
+from datetime import datetime
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from google import genai
 from dotenv import load_dotenv
 
-# טעינת המפתח הסודי מתוך קובץ ה- .env
+# טעינת המפתח הסודי
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# אתחול הלקוח של ג'מיני
 client = None
 if GOOGLE_API_KEY:
     client = genai.Client(api_key=GOOGLE_API_KEY)
@@ -39,79 +39,95 @@ def authenticate_google():
     print("החיבור לגוגל בוצע בהצלחה מלאה!")
     return creds
 
-def create_calendar_event(creds, title):
-    """פונקציה חדשה שיוצרת אירוע ביומן גוגל למחר בשעה 10:00 בבוקר"""
+def create_calendar_event(creds, title, start_iso, end_iso, location, description):
     try:
         service = build('calendar', 'v3', credentials=creds)
-        
-        # תזמון אוטומטי למחר ב-10:00 בבוקר
-        tomorrow = datetime.now() + timedelta(days=1)
-        start_time = tomorrow.replace(hour=10, minute=0, second=0, microsecond=0)
-        end_time = start_time + timedelta(hours=1) # פגישה של שעה
-        
         event = {
             'summary': title,
-            'description': 'נוצר אוטומטית על ידי מערכת ה-AI מה-Gmail שלך',
-            'start': {
-                'dateTime': start_time.isoformat(),
-                'timeZone': 'Asia/Jerusalem',
-            },
-            'end': {
-                'dateTime': end_time.isoformat(),
-                'timeZone': 'Asia/Jerusalem',
-            },
+            'location': location,
+            'description': description,
+            'start': {'dateTime': start_iso, 'timeZone': 'Asia/Jerusalem'},
+            'end': {'dateTime': end_iso, 'timeZone': 'Asia/Jerusalem'},
         }
-        
         created_event = service.events().insert(calendarId='primary', body=event).execute()
-        print(f"🎉 אירוע נוצר ביומן בהצלחה: {created_event.get('htmlLink')}")
+        print(f"🎉 אירוע דינמי נוצר ביומן בהצלחה: {created_event.get('htmlLink')}")
     except Exception as e:
         print(f"שגיאה ביצירת אירוע ביומן: {e}")
 
-def analyze_email_and_schedule(creds, subject):
-    """פונקציה שמנתחת את המייל ומחליטה אם לזמן פגישה ביומן"""
+def analyze_email_content_with_ai(creds, subject, body):
     if not client:
         return
     try:
-        # ביקשנו מה-AI לענות בפורמט מובנה כדי שהקוד יוכל לקבל החלטה
+        current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        # פרומפט נקי לחלוטין משורות מפוצלות - מונע SyntaxError ב-100%
         prompt = (
-            f"נתח את כותרת המייל הבאה: '{subject}'. "
-            f"האם מדובר בבקשה לפגישה, דיון או משהו שצריך לתזמן ביומן? "
-            f"ענה אך ורק במילה אחת: 'YES' או 'NO'."
+            f"Current time: {current_time_str}. "
+            f"Analyze this email. Subject: {subject}. Body: {body}. "
+            "Task: Check if this email is asking for a meeting/class/interview. "
+            "If NO, return exactly: {\"is_meeting\": false} "
+            "If YES, extract details and return a valid JSON only (no backticks, no markdown) with these keys: "
+            "\"is_meeting\" (true), \"title\" (in Hebrew), \"start_time\" (ISO 8601 string), \"end_time\" (ISO 8601 string, 1 hour later if not specified), \"location\" (in Hebrew, or 'לא נקבע מיקום'), \"description\" (brief summary in Hebrew)."
         )
+        
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=prompt,
         )
         
-        decision = response.text.strip().upper()
-        print(f"המייל: {subject} -> החלטת ה-AI לתזמון: {decision}")
+        clean_json_text = response.text.strip().replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean_json_text)
         
-        # אם ה-AI קבע שזה דורש פגישה - נתזמן אוטומטית ביומן!
-        if "YES" in decision:
-            print(f"🤖 ה-AI זיהה צורך בפגישה! מייצר אירוע עבור: '{subject}'...")
-            create_calendar_event(creds, subject)
+        if data.get("is_meeting"):
+            print(f"🤖 ה-AI זיהה פגישה במלל החופשי!")
+            print(f"   📋 כותרת: {data.get('title')}")
+            print(f"   📅 זמן: {data.get('start_time')}")
+            print(f"   📍 מיקום: {data.get('location')}")
+            
+            create_calendar_event(
+                creds,
+                title=data.get("title"),
+                start_iso=data.get("start_time"),
+                end_iso=data.get("end_time"),
+                location=data.get("location"),
+                description=data.get("description")
+            )
+        else:
+            print(f"המייל '{subject}' נותח: לא נמצאה פגישה במלל החופשי.")
             
     except Exception as e:
-        print(f"שגיאה בניתוח ה-AI: {e}")
+        print(f"שגיאה בניתוח ה-AI או בפענוח ה-JSON: {e}")
 
 def check_gmail_and_process(creds):
     service = build('gmail', 'v1', credentials=creds)
     results = service.users().messages().list(userId='me', maxResults=5).execute()
     messages = results.get('messages', [])
     
-    print(f"\n--- [Gmail + AI + Calendar] תהליך אוטומטי משולב: ---")
+    print(f"\n--- [Gmail AI Content Parser] ניתוח מלל חופשי מלא: ---")
     for msg in messages:
-        txt = service.users().messages().get(userId='me', id=msg['id']).execute()
+        txt = service.users().messages().get(userId='me', id=msg['id'], format='full').execute()
         headers = txt['payload']['headers']
+        
         subject = "ללא כותרת"
         for header in headers:
             if header['name'].lower() == 'subject':
                 subject = header['value']
                 break
         
-        # מפעילים את הניתוח שגם יוצר אירוע ביומן במידת הצורך
-        analyze_email_and_schedule(creds, subject)
-        print("-" * 40)
+        body = ""
+        if 'parts' in txt['payload']:
+            parts = txt['payload']['parts']
+            for part in parts:
+                if part['mimeType'] == 'text/plain' and 'data' in part['body']:
+                    import base64
+                    body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='ignore')
+                    break
+        elif 'body' in txt['payload'] and 'data' in txt['payload']['body']:
+            import base64
+            body = base64.urlsafe_b64decode(txt['payload']['body']['data']).decode('utf-8', errors='ignore')
+            
+        analyze_email_content_with_ai(creds, subject, body)
+        print("-" * 50)
 
 if __name__ == '__main__':
     credentials = authenticate_google()
