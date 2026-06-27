@@ -1,0 +1,7 @@
+﻿supplier,country,specialty,estimated_lead_time_days,indicative_unit_price_usd,certifications,prior_experience,risk_notes
+Delta Components Trading,China,Battery management electronics,42,18.4,"ISO 9001, IATF pending",current supplier,port congestion exposure
+Nordic Power Systems,Poland,EV control modules,35,21.1,"ISO 9001, IATF 16949",sample approved in 2024,"higher price, stable transit"
+K-Line Embedded,Korea,Motor and battery controllers,38,19.8,"ISO 9001, ISO 14001",no production history,engineering validation needed
+Adria Electronics,Slovenia,Industrial PCB assemblies,51,18.95,ISO 9001,supplier of PCB-PWR-CTRL,limited BMS capacity
+Shenzhen VoltGate,China,BMS modules,28,17.7,ISO 9001,none,documentation gaps
+Marmara Control Tech,Turkey,battery and charging controls,31,20.25,"ISO 9001, CE declarations",small prototype order,capacity not proven
