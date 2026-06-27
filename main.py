@@ -3,8 +3,21 @@ import pickle
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+# שימוש ב-SDK החדש והרשמי של גוגל
+from google import genai
+from dotenv import load_dotenv
 
-# הרשאות מעודכנות - קריאה בלבד למייל וגישה מלאה ליומן
+# טעינת המפתח הסודי מתוך קובץ ה- .env
+load_dotenv()
+GOOGLE_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# אתחול הלקוח של ג'מיני בגרסה החדשה והרשמית
+client = None
+if GOOGLE_API_KEY:
+    client = genai.Client(api_key=GOOGLE_API_KEY)
+else:
+    print("אזהרה: מפתח GEMINI_API_KEY לא נמצא בקובץ .env!")
+
 SCOPES = [
     'https://www.googleapis.com/auth/calendar',
     'https://www.googleapis.com/auth/gmail.readonly'
@@ -15,28 +28,37 @@ def authenticate_google():
     if os.path.exists('token.pickle'):
         with open('token.pickle', 'rb') as token:
             creds = pickle.load(token)
-            
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json', SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
-            
         with open('token.pickle', 'wb') as token:
             pickle.dump(creds, token)
-            
     print("החיבור לגוגל בוצע בהצלחה מלאה!")
     return creds
 
+def analyze_email_with_ai(subject):
+    """פונקציה המשתמשת ב-SDK החדש לניתוח הכותרת"""
+    if not client:
+        return "שגיאה: ה-AI לא אותחל בגלל מפתח לא תקין או חסר."
+    try:
+        # קריאה למודל העדכני של 2026 עם המבנה החדש
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=f"נתח את כותרת המייל הבאה: '{subject}'. האם מדובר בבקשה לפגישה או משימה שיש לה תאריך? ענה במשפט אחד קצר.",
+        )
+        return response.text.strip()
+    except Exception as e:
+        return f"שגיאה בניתוח ה-AI: {e}"
+
 def check_gmail(creds):
     service = build('gmail', 'v1', credentials=creds)
-    # מושך את 5 המיילים האחרונים בתיבה
     results = service.users().messages().list(userId='me', maxResults=5).execute()
     messages = results.get('messages', [])
     
-    print(f"\n--- [Gmail] מצאתי {len(messages)} מיילים בתיבה: ---")
+    print(f"\n--- [Gmail + AI] ניתוח המיילים בתיבה עם ה-SDK החדש: ---")
     for msg in messages:
         txt = service.users().messages().get(userId='me', id=msg['id']).execute()
         headers = txt['payload']['headers']
@@ -45,23 +67,12 @@ def check_gmail(creds):
             if header['name'].lower() == 'subject':
                 subject = header['value']
                 break
-        print(f"- {subject}")
-
-def check_calendar(creds):
-    service = build('calendar', 'v3', credentials=creds)
-    # מושך את 5 האירועים הקרובים ביותר ביומן
-    results = service.events().list(calendarId='primary', maxResults=5, singleEvents=True, orderBy='startTime').execute()
-    events = results.get('items', [])
-    
-    print(f"\n--- [Google Calendar] האירועים הקרובים ביומן: ---")
-    if not events:
-        print("היומן ריק מאירועים כרגע.")
-    for event in events:
-        start = event['start'].get('dateTime', event['start'].get('date'))
-        print(f"- {event['summary']} ({start})")
+        
+        # הפעלת ה-AI על כותרת המייל
+        ai_analysis = analyze_email_with_ai(subject)
+        print(f"המייל: {subject}")
+        print(f"ניתוח ה-AI: {ai_analysis}\n")
 
 if __name__ == '__main__':
-    # הרצת התהליך המלא
     credentials = authenticate_google()
     check_gmail(credentials)
-    check_calendar(credentials)
